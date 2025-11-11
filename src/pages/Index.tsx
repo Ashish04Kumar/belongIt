@@ -72,13 +72,20 @@ const Index = () => {
       gpsLocation: data.gpsLocation,
     };
 
+    let updatedItems: OrganizerItem[];
     if (parentIdForNew) {
       // Add as child
-      setItems(addChildToParent(items, parentIdForNew, newItem));
+      updatedItems = addChildToParent(items, parentIdForNew, newItem);
     } else {
       // Add as root
-      setItems([...items, newItem]);
+      updatedItems = [...items, newItem];
     }
+    
+    setItems(updatedItems);
+
+    // Console log the complete structure
+    console.log('=== COMPLETE ITEMS STRUCTURE AFTER ADDING ===');
+    console.log(JSON.stringify(updatedItems, null, 2));
 
     // Schedule notification if expiry date is set
     if (data.expiryDate) {
@@ -108,8 +115,13 @@ const Index = () => {
       physicalLocation: data.physicalLocation,
     };
 
-    setItems(updateItemInTree(items, updatedItem));
+    const updatedItems = updateItemInTree(items, updatedItem);
+    setItems(updatedItems);
     setEditingItem(null);
+
+    // Console log the complete structure
+    console.log('=== COMPLETE ITEMS STRUCTURE AFTER UPDATING ===');
+    console.log(JSON.stringify(updatedItems, null, 2));
 
     // Schedule notification if expiry date is set or updated
     if (data.expiryDate) {
@@ -124,7 +136,13 @@ const Index = () => {
 
   // Delete item
   const handleDelete = (id: string) => {
-    setItems(deleteItemFromTree(items, id));
+    const updatedItems = deleteItemFromTree(items, id);
+    setItems(updatedItems);
+    
+    // Console log the complete structure
+    console.log('=== COMPLETE ITEMS STRUCTURE AFTER DELETING ===');
+    console.log(JSON.stringify(updatedItems, null, 2));
+    
     toast({
       title: 'Deleted',
       description: 'Item has been removed.',
