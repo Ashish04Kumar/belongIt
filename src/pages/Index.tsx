@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Home, Settings, ScanBarcode, LayoutGrid, List, Network, Bell } from 'lucide-react';
+import { Plus, Search, Home, Settings, ScanBarcode, LayoutGrid, List, Network, Bell, Tag } from 'lucide-react';
 import { OrganizerItem, ItemFormData, ViewMode } from '@/types/organizer';
 import { ItemNode } from '@/components/organizer/ItemNode';
 import { ItemGrid } from '@/components/organizer/ItemGrid';
@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { initializePushNotifications, scheduleExpiryNotification, checkExpiringItems } from '@/lib/capacitor-utils';
 
 const Index = () => {
@@ -31,8 +32,8 @@ const Index = () => {
   const [defaultType, setDefaultType] = useState<'location' | 'item'>('location');
   const [viewMode, setViewMode] = useState<ViewMode>('tree');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [expiringItemsCount, setExpiringItemsCount] = useState(0);
+  const [tagSheetOpen, setTagSheetOpen] = useState(false);
   const { toast } = useToast();
 
   // Initialize notifications on mount
@@ -183,14 +184,15 @@ const Index = () => {
       }));
   };
 
-  // Helper: Search items
+  // Helper: Search items (includes tag matching)
   const searchInTree = (items: OrganizerItem[], query: string, tags: string[]): OrganizerItem[] => {
     if (!query && tags.length === 0) return items;
     
     return items.reduce<OrganizerItem[]>((acc, item) => {
       const matchesSearch = !query || 
         item.name.toLowerCase().includes(query.toLowerCase()) ||
-        item.description?.toLowerCase().includes(query.toLowerCase());
+        item.description?.toLowerCase().includes(query.toLowerCase()) ||
+        item.tags?.some(tag => tag.toLowerCase().includes(query.toLowerCase()));
       
       const matchesTags = tags.length === 0 || 
         (item.tags && tags.some(tag => item.tags?.includes(tag)));
@@ -240,6 +242,36 @@ const Index = () => {
     setSelectedTags(prev =>
       prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
     );
+    setTagSheetOpen(false);
+  };
+
+  // Get full path for an item
+  const getItemPath = (items: OrganizerItem[], targetId: string, path: string[] = []): string[] | null => {
+    for (const item of items) {
+      const currentPath = [...path, item.name];
+      if (item.id === targetId) return currentPath;
+      if (item.children.length > 0) {
+        const found = getItemPath(item.children, targetId, currentPath);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Get all items with a specific tag
+  const getItemsWithTag = (tag: string) => {
+    const result: Array<{ item: OrganizerItem; path: string[] }> = [];
+    const collectItems = (items: OrganizerItem[], parentPath: string[] = []) => {
+      items.forEach(item => {
+        const currentPath = [...parentPath, item.name];
+        if (item.tags?.includes(tag)) {
+          result.push({ item, path: currentPath });
+        }
+        collectItems(item.children, currentPath);
+      });
+    };
+    collectItems(items);
+    return result;
   };
 
   // Handle barcode scan - show full item details
@@ -285,6 +317,87 @@ const Index = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {allTags.length > 0 && (
+              <Sheet open={tagSheetOpen} onOpenChange={setTagSheetOpen}>
+                <SheetTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="icon"
+                    title="Filter by tags"
+                  >
+                    <Tag className="h-5 w-5" />
+                    {selectedTags.length > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                        {selectedTags.length}
+                      </span>
+                    )}
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+                  <SheetHeader>
+                    <SheetTitle>Filter by Tags</SheetTitle>
+                    <SheetDescription>
+                      Select tags to filter items. Click on a tag to see all items with that tag.
+                    </SheetDescription>
+                  </SheetHeader>
+                  <div className="mt-6 space-y-4">
+                    {selectedTags.length > 0 && (
+                      <div className="flex items-center justify-between pb-4 border-b">
+                        <span className="text-sm font-medium">Active Filters ({selectedTags.length})</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedTags([])}
+                        >
+                          Clear All
+                        </Button>
+                      </div>
+                    )}
+                    
+                    <div className="space-y-6">
+                      {allTags.map((tag) => {
+                        const itemsWithTag = getItemsWithTag(tag);
+                        const isSelected = selectedTags.includes(tag);
+                        
+                        return (
+                          <div key={tag} className="space-y-2">
+                            <div 
+                              className="flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
+                              onClick={() => handleToggleTag(tag)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge variant={isSelected ? 'default' : 'outline'}>
+                                  {tag}
+                                </Badge>
+                                <span className="text-sm text-muted-foreground">
+                                  {itemsWithTag.length} item{itemsWithTag.length !== 1 ? 's' : ''}
+                                </span>
+                              </div>
+                              {isSelected && (
+                                <span className="text-xs text-primary font-medium">Active</span>
+                              )}
+                            </div>
+                            
+                            {isSelected && (
+                              <div className="ml-4 space-y-2">
+                                {itemsWithTag.map(({ item, path }) => (
+                                  <div key={item.id} className="p-2 text-sm bg-muted rounded">
+                                    <div className="font-medium">{item.name}</div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                      📍 {path.slice(0, -1).join(' → ')}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            )}
             <Button 
               variant="ghost" 
               size="icon"
@@ -327,44 +440,15 @@ const Index = () => {
         {/* Search & Controls Bar */}
         <div className="mb-6 space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-              <PopoverTrigger asChild>
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search items, locations..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onFocus={() => setSearchOpen(true)}
-                    className="pl-10"
-                  />
-                </div>
-              </PopoverTrigger>
-              <PopoverContent className="p-0 w-[400px]" align="start">
-                <Command>
-                  <CommandInput placeholder="Type to search..." value={searchQuery} onValueChange={setSearchQuery} />
-                  <CommandList>
-                    <CommandEmpty>No results found.</CommandEmpty>
-                    <CommandGroup heading="Suggestions">
-                      {searchSuggestions
-                        .filter(s => s.toLowerCase().includes(searchQuery.toLowerCase()))
-                        .slice(0, 8)
-                        .map((suggestion) => (
-                          <CommandItem
-                            key={suggestion}
-                            onSelect={() => {
-                              setSearchQuery(suggestion);
-                              setSearchOpen(false);
-                            }}
-                          >
-                            {suggestion}
-                          </CommandItem>
-                        ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search items, locations, tags..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
 
             <div className="flex gap-2">
               <Button
@@ -407,18 +491,19 @@ const Index = () => {
             </Button>
           </div>
 
-          {/* Tag Filter */}
+          {/* Tag Filter Pills */}
           {allTags.length > 0 && (
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-sm text-muted-foreground">Filter by tags:</span>
+              <span className="text-sm text-muted-foreground font-medium">Tags:</span>
               {allTags.map((tag) => (
                 <Badge
                   key={tag}
                   variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                  className="cursor-pointer"
+                  className="cursor-pointer hover:bg-primary/80 transition-colors"
                   onClick={() => handleToggleTag(tag)}
                 >
                   {tag}
+                  {selectedTags.includes(tag) && ' ✕'}
                 </Badge>
               ))}
               {selectedTags.length > 0 && (
@@ -427,7 +512,7 @@ const Index = () => {
                   size="sm"
                   onClick={() => setSelectedTags([])}
                 >
-                  Clear
+                  Clear All
                 </Button>
               )}
             </div>
